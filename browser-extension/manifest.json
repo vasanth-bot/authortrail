@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "AuthorTrail",
+  "version": "0.1.0",
+  "description": "Records how text in any web editor was written (typed vs pasted, time spent) and seals it in an AuthorTrail chain. Your text never leaves your browser.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "action": { "default_popup": "popup.html", "default_title": "AuthorTrail" },
+  "background": { "service_worker": "background.js" }
+}

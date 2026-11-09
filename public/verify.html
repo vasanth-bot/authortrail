@@ -1,0 +1,53 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verify: AuthorTrail</title><link rel="stylesheet" href="style.css"></head><body><main>
+<h1 style="font-size:2.2rem">Verify a document</h1>
+<form class="row" id="f"><input id="idIn" placeholder="Paste a document ID or share link" aria-label="Document ID or link" style="flex:1;min-width:240px"><button class="btn">Check</button></form><p class="msg bad" id="err"></p>
+<div id="out" hidden>
+<div class="row" style="gap:28px;margin:26px 0"><div class="seal" id="seal"></div><div><h2 style="margin:0" id="title"></h2><p class="note" id="meta"></p><span class="row"><button class="btn ghost sm" onclick="print()">Save certificate as PDF</button><button class="btn ghost sm" id="dl">Download evidence file</button></span></div></div>
+<div class="panel" id="orig" style="margin-bottom:16px"></div><div class="panel" id="decl" style="margin-bottom:16px" hidden></div><div class="panel"><h3>Writing process</h3><div id="rib"></div><div id="rep" style="margin-top:14px"></div><p class="note" id="note"></p></div>
+<h2>Checkpoints</h2><div class="panel wrap"><table><thead><tr><th>#</th><th>Time</th><th>Typed</th><th>Pasted</th><th>Hash</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div id="shareP" hidden><h2>Sharing</h2><div class="panel"><div class="row"><label for="vis"><b>Who can open this record</b></label><select id="vis"><option value="public">Anyone with the link</option><option value="private">Only people I share a link with</option></select></div>
+<div class="row" style="margin-top:12px"><select id="days" aria-label="Link expiry"><option value="1">Expires in 1 day</option><option value="7" selected>Expires in 7 days</option><option value="30">Expires in 30 days</option><option value="0">Never expires</option></select><button class="btn" id="mk">Create share link</button><button class="btn ghost" id="rvk">Revoke all links</button></div><p class="msg" id="shm" role="status"></p>
+<h3 style="margin-top:16px">AI use declaration</h3><p class="note">Tell reviewers how you used AI tools. This is your own statement and is shown on the record.</p><div class="row"><select id="dl2" aria-label="AI use"><option value="">Not declared</option><option value="none">No AI tools used</option><option value="grammar">Grammar and spelling only</option><option value="ideas">Brainstorming and feedback</option><option value="drafting">Helped draft parts of the text</option></select><input id="dn" maxlength="300" placeholder="Optional note" style="flex:1;min-width:200px"><button class="btn ghost" id="sd">Save</button></div>
+<details style="margin-top:14px"><summary>Delete this record</summary><p class="note">This removes the record from the server permanently.</p><button class="btn ghost" id="del">Delete record</button></details></div></div>
+<h2>Is this the version the author worked on?</h2><div class="panel"><p class="note">The author sends you a reveal file. Load it here and AuthorTrail compares it with every version recorded for this document.</p>
+<input type="file" id="rf" accept=".json,application/json" aria-label="Reveal file"><textarea id="rv" rows="3" style="margin-top:10px" placeholder="Or paste the reveal file contents here"></textarea><div class="row" style="margin-top:10px"><button class="btn" id="rvb">Check</button></div><div id="rvm" role="status"></div></div></div>
+</main><script src="app.js"></script><script>
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));const DECL={none:'No AI tools were used.',grammar:'AI was used for grammar and spelling only.',ideas:'AI was used for brainstorming and feedback.',drafting:'AI helped draft parts of the text.'};
+let D,CH,K=new URLSearchParams(location.search).get('k')||'';const qk=()=>K?'?k='+encodeURIComponent(K):'';
+async function load(id){$('#err').textContent='';try{D=await api('docs/'+id+qk())}catch(e){$('#out').hidden=true;return $('#err').textContent=e.message==='Document not found'?'Document not found. Check the ID and try again.':e.message}
+const ok=D.integrity.ok&&await chainOk(D.chain,D.genesis);CH=ok;$('#out').hidden=false;
+$('#seal').className='seal '+(ok?'ok':'bad');$('#seal').innerHTML=ok?'Chain<br>intact':'Chain<br>broken';
+$('#title').textContent=D.title;$('#meta').textContent='Started '+new Date(D.createdAt).toLocaleString()+'. Chain checked in your browser.';
+const dc=D.declaration;$('#decl').hidden=!dc;if(dc)$('#decl').innerHTML=`<h3>Author's declaration</h3><p style="margin:0">${DECL[dc.level]}${dc.note?' '+esc(dc.note):''}</p><p class="note" style="margin:6px 0 0">Stated by the author. AuthorTrail does not verify it.</p>`;
+$('#dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(D,null,1)],{type:'application/json'}));a.download='evidence-'+D.id+'.json';a.click()};
+$('#shareP').hidden=!D.isOwner;if(D.isOwner){const post=(p,b)=>api(`docs/${D.id}/${p}`,{method:'POST',headers:{'Content-Type':'application/json','x-owner-token':(lib().find(x=>x.id===D.id)||{}).token||''},body:JSON.stringify(b||{})}),sm=t=>$('#shm').textContent=t;
+ $('#vis').value=D.visibility;$('#dl2').value=dc?dc.level:'';$('#dn').value=dc?dc.note:'';$('#sd').onclick=()=>post('settings',{declaration:{level:$('#dl2').value,note:$('#dn').value}}).then(()=>{sm('Declaration saved.');load(D.id)}).catch(e=>sm(e.message));$('#vis').onchange=()=>post('settings',{visibility:$('#vis').value}).then(()=>sm('Saved.')).catch(e=>sm(e.message));
+ $('#mk').onclick=async()=>{try{const s=await post('shares',{days:Number($('#days').value)}),link=location.origin+'/verify.html?id='+D.id+'&k='+s.key;await navigator.clipboard.writeText(link);sm('Link copied: '+link)}catch(e){sm(e.message)}};
+ $('#rvk').onclick=()=>post('revoke').then(()=>sm('All share links revoked.')).catch(e=>sm(e.message));
+ $('#del').onclick=()=>confirm('Delete this record permanently?')&&post('delete').then(()=>location='write.html').catch(e=>sm(e.message))}
+$('#rib').innerHTML=ribbon(D.chain);const r=D.report;
+$('#rep').innerHTML=[['Checkpoints',r.checkpoints],['Typed share',r.typedShare==null?'n/a':Math.round(r.typedShare*100)+'%'],['Active writing',r.activeMinutes+' min'],['Writing bursts',r.writingBursts],['Large pastes (200+ chars)',r.largePastes.length],['Time span',r.spanMinutes+' min']].map(([a,b])=>`<div class="stat"><span>${a}</span><b>${b}</b></div>`).join('');
+$('#note').textContent=r.note;
+const o=r.originality,bar=(n,v,w)=>`<div class="stat"><span>${n} <span class="note">(${w})</span></span><b>${v}%</b></div>`;
+$('#orig').innerHTML=(o?`<div class="row" style="gap:22px"><div class="score ${o.label}">${o.score}%</div><div><h3 style="margin:0">Originality: ${o.label.toLowerCase()}</h3><p class="note" style="margin:2px 0 0">A score for how the text was written. It is not an AI detector.</p></div></div><div style="margin-top:12px">${bar('How the text was entered',o.parts.entry,'70%')}${bar('Revision while drafting',o.parts.revision,'15%')}${bar('Writing pace',o.parts.pace,'15%')}</div>`:`<h3>Originality</h3><p class="note">Not enough text yet to score.</p>`)+`<h3 style="margin-top:16px">How to improve it</h3><ul>${r.suggestions.map(x=>`<li>${x.replace(/</g,'&lt;')}</li>`).join('')}</ul><div class="row"><button class="btn ghost" id="coach">Ask the AI coach</button></div><p class="note" id="coachOut" style="white-space:pre-wrap"></p>`;
+$('#coach').onclick=async()=>{const out=$('#coachOut');out.textContent='Thinking...';try{const a=await api('ai/coach',{method:'POST',headers:{'Content-Type':'application/json','x-library-code':libCode()},body:JSON.stringify({id:D.id})});out.textContent=a.advice}catch(e){out.textContent=e.message}};
+$('#rows').innerHTML=D.chain.map(c=>`<tr><td>${c.index}</td><td>${new Date(c.serverTime).toLocaleString()}</td><td>${c.stats.typed}</td><td>${c.stats.pasted}</td><td class="hash">${c.hash.slice(0,16)}…</td></tr>`).join('')}
+$('#f').onsubmit=e=>{e.preventDefault();let v=$('#idIn').value.trim();K='';try{const u=new URL(v);K=u.searchParams.get('k')||'';v=u.searchParams.get('id')||v}catch{}history.replaceState(0,'','?id='+v+(K?'&k='+K:''));load(v)};
+$('#rf').onchange=async e=>{const f=e.target.files[0];if(f)$('#rv').value=await f.text()};
+const fp=async j=>{if(j.files){const p=[];for(const f of Object.keys(j.files).sort())p.push(f+':'+await sha(j.salt+j.files[f]));return sha(p.join('\n'))}return sha(j.salt+j.text)};
+const sum=ch=>{const t=k=>ch.reduce((a,c)=>a+c.stats[k],0),ty=t('typed'),pa=t('pasted');return{typed:ty,pasted:pa,share:ty+pa?Math.round(ty/(ty+pa)*100):0,min:+(t('activeSec')/60).toFixed(1),big:ch.filter(c=>c.stats.pasted>=200).length}};
+$('#rvb').onclick=async()=>{const m=$('#rvm'),say=(k,h,t)=>{m.className='verdict '+k;m.innerHTML=`<h3>${h}</h3>${t}`};
+ try{const j=JSON.parse($('#rv').value);
+  if(j.id&&j.id!==D.id)return say('bad','Not verified','This reveal file belongs to a different document.');
+  if(!CH)return say('bad','Cannot be trusted','The record itself failed its integrity check, so no match can be relied on.');
+  const h=await fp(j),i=D.chain.map(c=>c.contentHash).lastIndexOf(h);
+  if(i<0)return say('bad','Not verified','This text does not match any version recorded for this document. It is not something the author saved while working on it here.');
+  const pr=await api(`docs/${D.id}/proof/${i}${qk()}`);let x=pr.leaf;for(const s of pr.proof)x=await sha(s.left?s.hash+x:x+s.hash);
+  if(x!==D.merkleRoot)return say('bad','Not verified','A matching checkpoint was found, but its proof against the chain failed.');
+  const c=D.chain[i],u=sum(D.chain.slice(0,i+1)),when=new Date(c.serverTime).toLocaleString(),last=D.chain.length-1,later=D.chain.slice(i+1);
+  const upto=`Up to this version the author typed ${u.typed} characters and pasted ${u.pasted} (${u.share}% typed), with ${u.min} minutes of active writing and ${u.big} large paste${u.big==1?'':'s'}.`;
+  if(i===last)say('ok','Verified: this is the version the author worked on',`It matches the final checkpoint (${i+1} of ${D.chain.length}), recorded ${when}. ${upto}`);
+  else{const l=sum(later);say('ok','Verified: an earlier version the author worked on',`It matches checkpoint ${i+1} of ${D.chain.length}, recorded ${when}. It is not the final version: afterwards the author typed ${l.typed} more characters and pasted ${l.pasted} over ${later.length} more checkpoint${later.length==1?'':'s'}. ${upto}`)}
+ }catch{say('bad','Cannot read this file','Load a reveal file exported from AuthorTrail.')}};
+const q=new URLSearchParams(location.search).get('id');if(q){$('#idIn').value=q;load(q)}
+</script></body></html>

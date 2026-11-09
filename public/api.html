@@ -1,0 +1,18 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="style.css"><title> API: AuthorTrail</title></head><body><main><h1 style="font-size:2.4rem">API reference</h1><p class="lead">All endpoints are JSON over HTTP. Owner keys go in <code>x-owner-token</code>, connection codes in <code>x-library-code</code>.</p>
+<div class="panel wrap"><table><thead><tr><th>Endpoint</th><th>Access</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>POST /api/docs</code></td><td>Open</td><td>Create a document. Returns the id and owner key.</td></tr>
+<tr><td><code>POST /api/docs/:id/checkpoints</code></td><td>Owner key</td><td>Add a checkpoint: content hash and statistics.</td></tr>
+<tr><td><code>GET /api/docs/:id</code></td><td>Public, or author, teacher, or <code>?k=</code> share key</td><td>Chain, integrity, originality score, suggestions.</td></tr>
+<tr><td><code>GET /api/docs/:id/proof/:i</code></td><td>As above</td><td>Merkle proof for one checkpoint.</td></tr>
+<tr><td><code>GET /api/docs/:id/anchor</code></td><td>As above</td><td>Digest to stamp with an external timestamp service.</td></tr>
+<tr><td><code>POST /api/docs/:id/settings</code></td><td>Author</td><td>Set visibility and the AI use declaration.</td></tr>
+<tr><td><code>POST /api/docs/:id/shares</code> and <code>/revoke</code></td><td>Author</td><td>Create an expiring share link, or revoke all.</td></tr>
+<tr><td><code>POST /api/docs/:id/delete</code></td><td>Author</td><td>Delete the record.</td></tr>
+<tr><td><code>GET /api/library/:code</code></td><td>Connection code</td><td>List documents linked to a code.</td></tr>
+<tr><td><code>GET /api/insights</code></td><td>Connection code</td><td>Daily activity, streak and totals.</td></tr>
+<tr><td><code>POST /api/ai/coach</code></td><td>Author</td><td>Personalised coaching (needs a server API key).</td></tr>
+<tr><td><code>POST /api/classes</code>, <code>GET /api/classes</code></td><td>Connection code</td><td>Create and list classes.</td></tr>
+<tr><td><code>POST /api/classes/join</code></td><td>Author of the document</td><td>Submit a document to a class by join code.</td></tr>
+<tr><td><code>GET /api/classes/:id</code> and <code>/csv</code></td><td>Class owner</td><td>Submissions with flags, as JSON or CSV.</td></tr>
+<tr><td><code>GET /api/status</code></td><td>Open</td><td>Server and AI coach status.</td></tr></tbody></table></div>
+<h2>Example</h2><pre class="code"><code>curl -X POST http://localhost:3000/api/docs -d '{"title":"My essay"}'</code></pre></main><script src="app.js"></script></body></html>

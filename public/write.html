@@ -1,0 +1,37 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Write: AuthorTrail</title><link rel="stylesheet" href="style.css"></head><body><main>
+<div class="row" style="justify-content:space-between"><h1 style="font-size:2.2rem;margin:0" id="ttl">Your documents</h1><button class="btn ghost" id="newBtn">New document</button></div>
+<div class="panel" id="list" style="margin:18px 0"><ul class="docs" id="docs"></ul><p class="note" id="none" hidden>No documents yet. Create one with New document, or use the <a href="setup.html">setup guide</a> to connect VS Code or your browser.</p>
+<h3 style="margin-top:16px">Your connection code</h3><p class="note">Paste it into the VS Code and browser extensions so their documents appear here. Steps are in the <a href="setup.html">setup guide</a>.</p><div class="row"><code class="hash" id="code"></code><button class="btn ghost" id="cc">Copy code</button></div></div>
+<div class="split" id="ed" hidden><div><textarea class="page" id="ta" placeholder="Start writing. Your text stays in this browser."></textarea></div>
+<aside class="panel"><div id="st"></div><div class="row" style="margin-top:14px"><button class="btn" id="cp">Save checkpoint</button><button class="btn ghost" id="ai">Ask AI coach</button><button class="btn ghost" id="share">Copy share link</button><button class="btn ghost" id="rev">Download reveal file</button></div><p class="msg" id="msg" role="status"></p><p class="note" id="aiOut" style="white-space:pre-wrap"></p></aside></div>
+</main><script src="app.js"></script><script>
+const id=new URLSearchParams(location.search).get('doc');let L=lib();const cur=L.find(d=>d.id===id);
+async function submit(id){const code=prompt('Class join code from your teacher');if(!code)return;const student=prompt('Your name, as your teacher knows it');if(!student)return;const l=L.find(x=>x.id===id);
+ try{const r=await api('classes/join',{method:'POST',headers:{'Content-Type':'application/json','x-owner-token':l?l.token:''},body:JSON.stringify({joinCode:code.trim().toUpperCase(),docId:id,student})});alert('Submitted to '+r.className+'. Your teacher can now view this record.')}catch(e){alert(e.message)}}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const drawList=async()=>{let S=[];try{S=await api('library/'+libCode())}catch{}const m=new Map(S.map(d=>[d.id,d]));
+ const rows=[...L.map(d=>({...(m.get(d.id)||{checkpoints:'',source:'web'}),id:d.id,title:d.title,local:true})),...S.filter(d=>!L.some(l=>l.id===d.id)).map(d=>({...d,local:false}))];
+ $('#docs').innerHTML=rows.map(d=>{const src={vscode:'VS Code',browser:'Browser'}[d.source]||'Editor',sc=d.score==null?'<span class="pill">No score yet</span>':`<span class="pill ${d.score>=80?'ok':d.score>=50?'mid':'low'}">${d.score}% original</span>`;
+ return `<li class="docrow"><div><strong>${esc(d.title)}</strong><div class="note">${src}${d.checkpoints!==''?', '+d.checkpoints+' checkpoints':''}</div></div><div class="row">${sc}${d.local?`<a class="btn ghost sm" href="write.html?doc=${d.id}">Open</a>`:''}<a class="btn ghost sm" href="verify.html?id=${d.id}">Record</a><button class="btn ghost sm" data-sub="${d.id}">Submit to class</button></div></li>`}).join('');$('#none').hidden=rows.length>0;document.querySelectorAll('[data-sub]').forEach(b=>b.onclick=()=>submit(b.dataset.sub))};drawList();
+$('#code').textContent=libCode();$('#cc').onclick=()=>navigator.clipboard.writeText(libCode());
+$('#newBtn').onclick=async()=>{const title=prompt('Document title');if(!title)return;const r=await api('docs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,library:libCode(),source:'web'})});
+ L.push({id:r.id,token:r.ownerToken,salt:crypto.randomUUID(),title});saveLib(L);location.search='?doc='+r.id};
+if(cur){$('#ed').hidden=false;$('#list').hidden=true;$('#ttl').textContent=cur.title;
+const ta=$('#ta'),key='at.text.'+cur.id,msg=t=>{$('#msg').textContent=t};
+ta.value=localStorage.getItem(key)||'';let last=ta.value.length,lastAt=0,dirty=false,total={n:0,typed:0,pasted:0},t={typed:0,pasted:0,deleted:0,activeSec:0,bursts:0},lastIdx=-1,orig='n/a';const setO=d=>{orig=d.report.originality?d.report.originality.score+'%':'n/a'};
+const show=()=>{$('#st').innerHTML=[['Checkpoints',total.n],['Typed',total.typed+t.typed],['Pasted',total.pasted+t.pasted],['Characters',ta.value.length],['Originality',orig],['Unsaved changes',dirty?'Yes':'No']].map(([a,b])=>`<div class="stat"><span>${a}</span><b>${b}</b></div>`).join('')};
+api('docs/'+cur.id).then(d=>{total={n:d.chain.length,typed:d.report.typedChars,pasted:d.report.pastedChars};lastIdx=d.chain.length-1;setO(d);show()});show();
+ta.addEventListener('input',e=>{const now=Date.now(),diff=ta.value.length-last,gap=now-lastAt;last=ta.value.length;lastAt=now;
+ if(gap>5000){t.bursts++;t.activeSec++}else t.activeSec+=gap/1000;
+ if(/^delete/.test(e.inputType))t.deleted+=Math.max(-diff,0);else if(/^insert(Composition)?Text$|^insert(LineBreak|Paragraph)$/.test(e.inputType))t.typed+=Math.max(diff,0);else if(diff>0)t.pasted+=diff;
+ dirty=true;localStorage.setItem(key,ta.value);show()});
+async function checkpoint(){if(!dirty)return msg('Nothing new to save.');const snap={...t},body={contentHash:await sha(cur.salt+ta.value),stats:{...snap,activeSec:Math.round(snap.activeSec),length:ta.value.length}};
+ try{const c=await api(`docs/${cur.id}/checkpoints`,{method:'POST',headers:{'Content-Type':'application/json','x-owner-token':cur.token},body:JSON.stringify(body)});
+ for(const k in snap)t[k]-=snap[k];total.n++;total.typed+=snap.typed;total.pasted+=snap.pasted;t.typed=t.typed||0;lastIdx=c.index;
+ dirty=ta.value.length!==last||Object.values(t).some(v=>v>0);msg('Checkpoint '+c.index+' saved.');api('docs/'+cur.id).then(d=>{setO(d);show()})}catch(e){msg('Could not save: '+e.message)}show()}
+$('#ai').onclick=async()=>{const o=$('#aiOut'),withDraft=ta.value.length>0&&confirm('Send your draft text to the AI coach for feedback? Choose Cancel to send only your writing statistics. Nothing is stored.');
+ if(dirty)await checkpoint();o.textContent='Thinking...';try{const r=await api('ai/coach',{method:'POST',headers:{'Content-Type':'application/json','x-owner-token':cur.token},body:JSON.stringify({id:cur.id,draft:withDraft?ta.value:undefined})});o.textContent=r.advice}catch(e){o.textContent=e.message}};
+$('#cp').onclick=checkpoint;setInterval(()=>dirty&&checkpoint(),30000);
+$('#share').onclick=()=>navigator.clipboard.writeText(location.origin+'/verify.html?id='+cur.id).then(()=>msg('Link copied.'));
+$('#rev').onclick=()=>{if(dirty)return msg('Save a checkpoint first, so the file matches it.');const b=new Blob([JSON.stringify({id:cur.id,checkpoint:lastIdx,salt:cur.salt,text:ta.value},null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='reveal-'+cur.id+'.json';a.click()}}
+</script></body></html>

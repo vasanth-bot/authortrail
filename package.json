@@ -1,0 +1,9 @@
+{
+  "name": "authortrail",
+  "version": "1.0.0",
+  "description": "Verifiable proof of human authorship: hash-chained, privacy-preserving writing-process records",
+  "main": "server.js",
+  "scripts": { "start": "node server.js", "test": "node test.js" },
+  "dependencies": { "pg": "^8.11.0" },
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "authortrail",
+  "displayName": "AuthorTrail",
+  "description": "Records the process of writing code (typed vs pasted, time spent) as a tamper-evident chain. Source code never leaves your machine.",
+  "version": "0.1.0",
+  "publisher": "authortrail",
+  "engines": { "vscode": "^1.80.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "authortrail.start", "title": "AuthorTrail: Start tracking this workspace" },
+      { "command": "authortrail.connect", "title": "AuthorTrail: Connect to my account" },
+      { "command": "authortrail.exportReveal", "title": "AuthorTrail: Export reveal file (to prove this code is my version)" },
+      { "command": "authortrail.checkpoint", "title": "AuthorTrail: Save checkpoint now" },
+      { "command": "authortrail.copyLink", "title": "AuthorTrail: Copy verification link" }
+    ],
+    "configuration": {
+      "title": "AuthorTrail",
+      "properties": {
+        "authortrail.serverUrl": { "type": "string", "default": "http://localhost:3000", "description": "Address of the AuthorTrail server." },
+        "authortrail.pasteThreshold": { "type": "number", "default": 20, "description": "A single insertion of at least this many characters counts as pasted (paste, autocomplete or AI suggestion)." }
+      }
+    }
+  }
+}

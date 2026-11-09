@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="style.css"><title> Independent check: AuthorTrail</title></head><body><main><h1 style="font-size:2.4rem">Independent check</h1><p class="lead">Verify a downloaded evidence file without trusting our server. This page runs entirely in your browser.</p>
+<div class="panel"><h3>Evidence file</h3><p class="note">On any record page, choose <b>Download evidence file</b>, then load it here.</p><input type="file" id="f" accept=".json,application/json" aria-label="Evidence file"><div id="out" role="status"></div></div></main><script src="app.js"></script><script>
+const lv=async h=>{let l=h.slice(),L=[l];while(l.length>1){const n=[];for(let i=0;i<l.length;i+=2)n.push(await sha(l[i]+(l[i+1]??l[i])));L.push(n);l=n}return L};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+$('#f').onchange=async e=>{const o=$('#out'),say=(k,h,t)=>{o.className='verdict '+k;o.innerHTML='<h3>'+h+'</h3>'+t};
+try{const D=JSON.parse(await e.target.files[0].text());if(!Array.isArray(D.chain)||!D.genesis)throw 0;
+const linked=await chainOk(D.chain,D.genesis),ordered=D.chain.every((c,i)=>!i||c.serverTime>=D.chain[i-1].serverTime),root=(await lv(D.chain.map(c=>c.hash))).at(-1)?.[0]??null,rootOk=root===D.merkleRoot;
+const t=k=>D.chain.reduce((a,c)=>a+c.stats[k],0),first=D.chain[0],last=D.chain.at(-1);
+const facts=`<p style="margin:6px 0 0">${esc(D.title)}: ${D.chain.length} checkpoints${first?', from '+new Date(first.serverTime).toLocaleString()+' to '+new Date(last.serverTime).toLocaleString():''}. Typed ${t('typed')} characters, pasted ${t('pasted')}.</p>`;
+if(linked&&ordered&&rootOk)say('ok','Verified: the record is intact','Every checkpoint links to the one before it, times are in order, and the Merkle root matches.'+facts);
+else say('bad','Not verified',[!linked&&'A checkpoint was changed or removed.',!ordered&&'Times are out of order.',!rootOk&&'The Merkle root does not match.'].filter(Boolean).join(' ')+facts)}catch{say('bad','Cannot read this file','Load an evidence file downloaded from an AuthorTrail record page.')}};
+</script></body></html>

@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="style.css"><title>Log in: AuthorTrail</title></head><body><main style="max-width:460px">
+<h1 id="h" style="font-size:2.2rem">Log in</h1><p class="note" id="sub">Your records, insights and classes stay linked to your account on every device.</p>
+<div class="panel"><div class="tabs" id="tabs"><button data-m="login">Log in</button><button data-m="signup">Create account</button></div>
+<form id="f" novalidate><div id="nm" hidden><label for="name">Name</label><input id="name" autocomplete="name"></div>
+<label for="email">Email</label><input id="email" type="email" autocomplete="email"><label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password">
+<label style="font-weight:400;display:flex;gap:8px;align-items:center"><input type="checkbox" id="show" style="width:auto"> Show password</label>
+<p class="msg bad" id="err" role="alert"></p><button class="btn" id="go" style="width:100%;justify-content:center">Log in</button></form></div>
+<p class="note" style="margin-top:14px">You do not need an account to open a share link, verify a file or read the guides.</p></main><script src="app.js"></script><script>
+let mode=new URLSearchParams(location.search).get('mode')==='signup'?'signup':'login';
+const setMode=m=>{mode=m;$('#nm').hidden=m==='login';$('#h').textContent=m==='login'?'Log in':'Create your account';$('#go').textContent=m==='login'?'Log in':'Create account';$('#pw').autocomplete=m==='login'?'current-password':'new-password';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.m===m));$('#err').textContent=''};
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>setMode(b.dataset.m));setMode(mode);
+$('#show').onchange=e=>$('#pw').type=e.target.checked?'text':'password';
+$('#f').onsubmit=async e=>{e.preventDefault();$('#err').textContent='';const body={email:$('#email').value,password:$('#pw').value};if(mode==='signup'){body.name=$('#name').value;body.libCode=libCode()}
+ try{const r=await api('auth/'+(mode==='login'?'login':'register'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ localStorage.setItem('at.session',r.token);localStorage.setItem('at.user',JSON.stringify(r.user));localStorage.setItem('at.lib',r.user.libCode);
+ const n=new URLSearchParams(location.search).get('next');location=/^[a-z0-9-]+\.html(\?[\w=&%.-]*)?$/i.test(n||'')?n:'write.html'}catch(x){$('#err').textContent=x.message}};
+</script></body></html>
