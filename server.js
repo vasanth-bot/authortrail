@@ -16,9 +16,15 @@ async function initStore() {
     await pool.query('CREATE TABLE IF NOT EXISTS store (id INT PRIMARY KEY, data JSONB NOT NULL)');
     const r = await pool.query('SELECT data FROM store WHERE id = 1');
     if (r.rows[0]) db = r.rows[0].data;
+    try { // readable tables for the Neon console. The app state itself lives in the `store` row.
+      await pool.query('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT, email TEXT, created_at TIMESTAMPTZ)');
+      await pool.query('CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, title TEXT, owner_email TEXT, source TEXT, visibility TEXT, checkpoints INT, originality INT, created_at TIMESTAMPTZ)');
+      await pool.query('CREATE TABLE IF NOT EXISTS files (doc_id TEXT NOT NULL, name TEXT NOT NULL, content TEXT, updated_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (doc_id, name))');
+    } catch (e) { console.error('Could not create tables:', e.message); }
     console.log('Using Postgres database');
   } else if (fs.existsSync(DB)) { db = JSON.parse(fs.readFileSync(DB)); console.log('Using local file data/db.json'); }
   db.docs ||= {}; db.classes ||= {}; db.users ||= {}; db.sessions ||= {};
+  if (pool) { for (const u of Object.values(db.users)) mirrorUser(u); for (const d of Object.values(db.docs)) mirrorDoc(d); }
 }
 const save = () => {
   if (!pool) return fs.writeFileSync(DB, JSON.stringify(db, null, 1));
@@ -26,6 +32,26 @@ const save = () => {
   saving = saving.then(() => pool.query('INSERT INTO store (id, data) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data', [snap])).catch(e => console.error('Database save failed:', e.message));
 };
 process.on('SIGTERM', async () => { await saving; process.exit(0); });
+// Readable copies of accounts and documents (never passwords), and per-document files.
+const q = (sql, params) => { if (pool) saving = saving.then(() => pool.query(sql, params)).catch(e => console.error('Database:', e.message)); };
+const mirrorUser = u => q('INSERT INTO users (id, name, email, created_at) VALUES ($1, $2, $3, to_timestamp($4 / 1000.0)) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email', [u.id, u.name, u.email, u.createdAt]);
+const mirrorDoc = d => {
+  const owner = Object.values(db.users).find(x => d.libHash && sha(x.libCode) === d.libHash), o = withScore(report(d.chain)).originality;
+  q('INSERT INTO documents (id, title, owner_email, source, visibility, checkpoints, originality, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8 / 1000.0)) ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, owner_email = EXCLUDED.owner_email, source = EXCLUDED.source, visibility = EXCLUDED.visibility, checkpoints = EXCLUDED.checkpoints, originality = EXCLUDED.originality',
+    [d.id, d.title, owner ? owner.email : null, d.source || 'web', d.visibility || 'public', d.chain.length, o ? o.score : null, d.createdAt]);
+};
+async function putFile(d, name, content) {
+  if (pool) return pool.query('INSERT INTO files (doc_id, name, content, updated_at) VALUES ($1, $2, $3, now()) ON CONFLICT (doc_id, name) DO UPDATE SET content = EXCLUDED.content, updated_at = now()', [d.id, name, content]);
+  (d.files ||= {})[name] = { content, updatedAt: Date.now() }; save();
+}
+async function listFiles(d, withContent) {
+  if (pool) {
+    const r = await pool.query(`SELECT name, ${withContent ? 'content, ' : ''}length(content) AS size, extract(epoch FROM updated_at) * 1000 AS "updatedAt" FROM files WHERE doc_id = $1 ORDER BY name`, [d.id]);
+    return r.rows.map(x => ({ ...x, size: Number(x.size), updatedAt: Math.round(Number(x.updatedAt)) }));
+  }
+  return Object.entries(d.files || {}).map(([name, f]) => ({ name, ...(withContent ? { content: f.content } : {}), size: f.content.length, updatedAt: f.updatedAt }));
+}
+const dropFiles = async d => { if (pool) await pool.query('DELETE FROM files WHERE doc_id = $1', [d.id]); };
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 const GENESIS = '0'.repeat(64);
 
@@ -124,7 +150,7 @@ const view = d => {
 };
 
 const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*' }); res.end(Buffer.isBuffer(body) || typeof body === 'string' ? body : JSON.stringify(body)); };
-const readBody = req => new Promise((ok, no) => { let b = ''; req.on('data', x => { b += x; if (b.length > 10000) { no(new Error('too large')); req.destroy(); } }); req.on('end', () => { try { ok(b ? JSON.parse(b) : {}); } catch (e) { no(e); } }); });
+const readBody = (req, max = 10000) => new Promise((ok, no) => { let b = ''; req.on('data', x => { b += x; if (b.length > max) { no(new Error('too large')); req.destroy(); } }); req.on('end', () => { try { ok(b ? JSON.parse(b) : {}); } catch (e) { no(e); } }); });
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript' };
 
 const server = http.createServer(async (req, res) => {
@@ -152,14 +178,14 @@ const server = http.createServer(async (req, res) => {
           const want = String(b.libCode || ''), taken = Object.values(db.users).some(x => x.libCode === want), salt = crypto.randomBytes(16).toString('hex'), id = crypto.randomBytes(6).toString('hex');
           u = db.users[id] = { id, name: String(b.name || email.split('@')[0]).trim().slice(0, 60) || 'Author', email, salt, hash: (await scrypt(pw, salt, 64)).toString('hex'), libCode: /^[A-Za-z0-9-]{8,64}$/.test(want) && !taken ? want : crypto.randomBytes(8).toString('hex'), createdAt: now };
         } else if (!u || !crypto.timingSafeEqual(await scrypt(pw, u.salt, 64), Buffer.from(u.hash, 'hex'))) return send(res, 401, { error: 'Email or password is incorrect.' });
-        const token = crypto.randomBytes(24).toString('hex'); db.sessions[sha(token)] = { userId: u.id, exp: now + 30 * 864e5 }; save();
+        const token = crypto.randomBytes(24).toString('hex'); db.sessions[sha(token)] = { userId: u.id, exp: now + 30 * 864e5 }; save(); if (p[2] === 'register') mirrorUser(u);
         return send(res, p[2] === 'register' ? 201 : 200, { token, user: { name: u.name, email: u.email, libCode: u.libCode } });
       }
     }
     if (req.method === 'POST' && p.length === 2 && p[1] === 'docs') {
       const b = await readBody(req), id = crypto.randomBytes(6).toString('hex'), ownerToken = crypto.randomBytes(24).toString('hex');
       db.docs[id] = { id, title: String(b.title || 'Untitled').slice(0, 120), createdAt: Date.now(), ownerHash: sha(ownerToken), chain: [], source: ['vscode', 'browser'].includes(b.source) ? b.source : 'web', libHash: b.library ? sha(String(b.library)) : null };
-      save(); return send(res, 201, { id, ownerToken });
+      save(); mirrorDoc(db.docs[id]); return send(res, 201, { id, ownerToken });
     }
     if (req.method === 'POST' && p[1] === 'ai' && p[2] === 'coach') {
       const b = await readBody(req), d = db.docs[b.id];
@@ -210,6 +236,12 @@ const server = http.createServer(async (req, res) => {
       if (p[3] === 'csv') return send(res, 200, ['Student,Document,Submitted,Checkpoints,Integrity,Originality,Flags', ...rows.map(r => [r.student, r.title, r.submittedAt ? new Date(r.submittedAt).toISOString() : '', r.checkpoints, r.intact ? 'Intact' : 'Broken', r.score ?? '', r.flags.join('; ')].map(csvCell).join(','))].join('\n'), 'text/csv');
       return send(res, 200, { id: c.id, name: c.name, joinCode: c.joinCode, rows });
     }
+    if (p[1] === 'files' && req.method === 'GET') { // every file saved to this account
+      if (!lib) return send(res, 403, { error: 'Missing connection code.' });
+      const out = [];
+      for (const d of Object.values(db.docs).filter(x => x.libHash === libH)) for (const f of await listFiles(d, false)) out.push({ docId: d.id, title: d.title, name: f.name, size: f.size, updatedAt: f.updatedAt });
+      return send(res, 200, out.sort((a, b) => b.updatedAt - a.updatedAt));
+    }
     if (p[1] === 'insights') { // activity across everything linked to this connection code
       if (!lib) return send(res, 403, { error: 'Missing connection code.' });
       const mine = Object.values(db.docs).filter(d => d.libHash === libH), days = {};
@@ -223,20 +255,32 @@ const server = http.createServer(async (req, res) => {
     }
     const d = db.docs[p[2]];
     if (!d) return send(res, 404, { error: 'Document not found' });
+    if (p[3] === 'files') { // cloud copies of the author's own files: private to the author
+      if (!authed(d, req)) return send(res, 403, { error: 'Only the author can use cloud files.' });
+      if (req.method === 'POST') {
+        const b = await readBody(req, 300000), name = String(b.name || 'document.txt').slice(0, 200), content = String(b.content ?? '');
+        if (content.length > 200000) return send(res, 413, { error: 'This file is too large (200,000 characters maximum).' });
+        const have = await listFiles(d, false);
+        if (have.length >= 50 && !have.some(f => f.name === name)) return send(res, 400, { error: 'A document can hold at most 50 files.' });
+        if (typeof b.salt === 'string' && /^[0-9a-f-]{8,64}$/i.test(b.salt)) { d.salt = b.salt; save(); }
+        await putFile(d, name, content); return send(res, 200, { ok: true });
+      }
+      if (req.method === 'GET') return send(res, 200, { salt: d.salt || null, files: await listFiles(d, true) });
+    }
     if (req.method === 'GET' && !canView(d, req, url.searchParams.get('k'))) return send(res, 403, { error: 'This record is private. Ask the author for a share link.' });
     if (req.method === 'POST' && ['settings', 'shares', 'revoke', 'delete'].includes(p[3])) {
       if (!authed(d, req)) return send(res, 403, { error: 'Only the author can change this record.' });
       const b = await readBody(req);
       if (p[3] === 'settings') { if (b.visibility) d.visibility = b.visibility === 'private' ? 'private' : 'public';
         if (b.declaration) d.declaration = ['none', 'grammar', 'ideas', 'drafting'].includes(b.declaration.level) ? { level: b.declaration.level, note: String(b.declaration.note || '').slice(0, 300) } : null;
-        save(); return send(res, 200, { visibility: d.visibility || 'public', declaration: d.declaration || null }); }
+        save(); mirrorDoc(d); return send(res, 200, { visibility: d.visibility || 'public', declaration: d.declaration || null }); }
       if (p[3] === 'shares') { const days = Math.max(0, Math.min(365, Number(b.days) || 0)), s = { key: crypto.randomBytes(9).toString('hex'), expires: days ? Date.now() + days * 864e5 : 8.64e15 }; (d.shares ||= []).push(s); save(); return send(res, 201, s); }
       if (p[3] === 'revoke') { d.shares = []; save(); return send(res, 200, { ok: true }); }
-      delete db.docs[d.id]; save(); return send(res, 200, { ok: true });
+      await dropFiles(d); delete db.docs[d.id]; save(); q('DELETE FROM documents WHERE id = $1', [d.id]); return send(res, 200, { ok: true });
     }
     if (req.method === 'POST' && p[3] === 'library') { // link an existing document to a connection code
       if (sha(req.headers['x-owner-token'] || '') !== d.ownerHash) return send(res, 403, { error: 'Invalid owner token' });
-      const b = await readBody(req); d.libHash = b.library ? sha(String(b.library)) : null; save(); return send(res, 200, { ok: true });
+      const b = await readBody(req); d.libHash = b.library ? sha(String(b.library)) : null; save(); mirrorDoc(d); return send(res, 200, { ok: true });
     }
     if (req.method === 'POST' && p[3] === 'checkpoints') {
       if (!authed(d, req)) return send(res, 403, { error: 'Invalid owner token' });
@@ -247,7 +291,7 @@ const server = http.createServer(async (req, res) => {
         stats: { typed: num(s.typed), pasted: num(s.pasted), deleted: num(s.deleted), activeSec: num(s.activeSec), bursts: num(s.bursts), length: num(s.length) },
         prevHash: d.chain.at(-1)?.hash ?? GENESIS };
       c.hash = entryHash(c.prevHash, c);
-      d.chain.push(c); save(); return send(res, 201, c);
+      d.chain.push(c); save(); mirrorDoc(d); return send(res, 201, c);
     }
     if (req.method === 'GET' && p.length === 3) return send(res, 200, { ...view(d), visibility: d.visibility || 'public', declaration: d.declaration || null, isOwner: authed(d, req) });
     if (req.method === 'GET' && p[3] === 'proof') { // Merkle inclusion proof for selective disclosure

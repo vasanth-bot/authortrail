@@ -40,3 +40,6 @@ Sign up and log in at `login.html`. Passwords are hashed with scrypt and session
 
 ## Free online hosting (GitHub + Neon + Render)
 Set `DATABASE_URL` to a Postgres connection string (for example from Neon) and the server stores everything in that database instead of `data/db.json`. Without it, the server uses the local file and needs no install. See the step-by-step guide in the chat or `setup.html`.
+
+## Cloud save and the database
+The verification record holds only fingerprints and counts. Separately, the editor can save a copy of your text to your account (on by default, untick it in the editor), and the VS Code extension can do the same with the setting `authortrail.cloudSave`. Saved files appear on the **Files** page. With a Postgres database, readable tables `users`, `documents` and `files` are kept in step so you can inspect them in the Neon console.

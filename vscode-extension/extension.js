@@ -53,11 +53,12 @@ async function checkpoint(manual) {
   if (!sess) return;
   if (!dirty) { if (manual) vscode.window.showInformationMessage('AuthorTrail: nothing new to save.'); return; }
   const snap = { ...t }; let len = 0;
-  const parts = snapshot().map(([f, s]) => { len += s.length; return f + ':' + sha(sess.salt + s); });
+  const snapFiles = snapshot(), parts = snapFiles.map(([f, s]) => { len += s.length; return f + ':' + sha(sess.salt + s); });
   try {
     await post(`${server()}/api/docs/${sess.id}/checkpoints`, { contentHash: sha(parts.join('\n')), stats: { ...snap, activeSec: Math.round(snap.activeSec), length: len } }, sess.token);
     for (const k in snap) t[k] -= snap[k];
     count++; dirty = Object.values(t).some(v => v > 0.5); label();
+    if (cfg('cloudSave') === true) for (const [f, s] of snapFiles) if (s.length <= 200000) await post(`${server()}/api/docs/${sess.id}/files`, { name: f, content: s }, sess.token).catch(() => {});
     if (manual) vscode.window.showInformationMessage('AuthorTrail: checkpoint saved.');
   } catch (e) { bar.text = '$(warning) AuthorTrail: server unreachable'; if (manual) vscode.window.showErrorMessage('AuthorTrail: ' + e.message); }
 }

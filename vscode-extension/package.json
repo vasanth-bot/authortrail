@@ -19,6 +19,7 @@
       "title": "AuthorTrail",
       "properties": {
         "authortrail.serverUrl": { "type": "string", "default": "http://localhost:3000", "description": "Address of the AuthorTrail server." },
+        "authortrail.cloudSave": { "type": "boolean", "default": false, "description": "Also save a copy of the files you edit to your AuthorTrail account (stored in the database, readable by the server owner)." },
         "authortrail.pasteThreshold": { "type": "number", "default": 20, "description": "A single insertion of at least this many characters counts as pasted (paste, autocomplete or AI suggestion)." }
       }
     }

@@ -2,7 +2,7 @@
 <h1 style="font-size:2.2rem">Verify a document</h1>
 <form class="row" id="f"><input id="idIn" placeholder="Paste a document ID or share link" aria-label="Document ID or link" style="flex:1;min-width:240px"><button class="btn">Check</button></form><p class="msg bad" id="err"></p>
 <div id="out" hidden>
-<div class="row" style="gap:28px;margin:26px 0"><div class="seal" id="seal"></div><div><h2 style="margin:0" id="title"></h2><p class="note" id="meta"></p><span class="row"><button class="btn ghost sm" onclick="print()">Save certificate as PDF</button><button class="btn ghost sm" id="dl">Download evidence file</button></span></div></div>
+<div class="row" style="gap:28px;margin:26px 0"><div class="seal" id="seal"></div><div><h2 style="margin:0" id="title"></h2><p class="note" id="meta"></p><span class="row"><button class="btn ghost sm" id="cert">Download certificate (PDF)</button><button class="btn ghost sm" id="dl">Download evidence file</button></span></div></div>
 <div class="panel" id="orig" style="margin-bottom:16px"></div><div class="panel" id="decl" style="margin-bottom:16px" hidden></div><div class="panel"><h3>Writing process</h3><div id="rib"></div><div id="rep" style="margin-top:14px"></div><p class="note" id="note"></p></div>
 <h2>Checkpoints</h2><div class="panel wrap"><table><thead><tr><th>#</th><th>Time</th><th>Typed</th><th>Pasted</th><th>Hash</th></tr></thead><tbody id="rows"></tbody></table></div>
 <div id="shareP" hidden><h2>Sharing</h2><div class="panel"><div class="row"><label for="vis"><b>Who can open this record</b></label><select id="vis"><option value="public">Anyone with the link</option><option value="private">Only people I share a link with</option></select></div>
@@ -13,12 +13,34 @@
 <input type="file" id="rf" accept=".json,application/json" aria-label="Reveal file"><textarea id="rv" rows="3" style="margin-top:10px" placeholder="Or paste the reveal file contents here"></textarea><div class="row" style="margin-top:10px"><button class="btn" id="rvb">Check</button></div><div id="rvm" role="status"></div></div></div>
 </main><script src="app.js"></script><script>
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));const DECL={none:'No AI tools were used.',grammar:'AI was used for grammar and spelling only.',ideas:'AI was used for brainstorming and feedback.',drafting:'AI helped draft parts of the text.'};
+// PDF-START
+function buildPdf(rows){
+ const pe=s=>String(s).replace(/[^\x20-\x7e]/g,'?').replace(/([\\()])/g,'\\$1');let y=790,s='1.5 w 30 30 535 782 re S\n';
+ for(const [t,size,bold,gap] of rows){y-=size*1.45+(gap||0);s+=`BT /F${bold?2:1} ${size} Tf 56 ${y.toFixed(1)} Td (${pe(t)}) Tj ET\n`}
+ const objs=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>','<< /Length '+s.length+' >>\nstream\n'+s+'endstream','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>'];
+ let pdf='%PDF-1.4\n';const off=[];objs.forEach((o,i)=>{off.push(pdf.length);pdf+=`${i+1} 0 obj\n${o}\nendobj\n`});
+ const x=pdf.length;return pdf+`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`+off.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF`}
+// PDF-END
+function downloadCert(D){
+ const r=D.report,o=r.originality,wrap=(t,n)=>{const out=[];let l='';for(const w of String(t).split(' ')){if((l+' '+w).trim().length>n){out.push(l);l=w}else l=(l+' '+w).trim()}if(l)out.push(l);return out};
+ const rows=[['AuthorTrail',12,1],['Certificate of Writing Process',24,1,4],['Title: '+D.title,13,1,14],['Record ID: '+D.id,11],['Created: '+new Date(D.createdAt).toLocaleString(),11],
+  ['Integrity: '+((D.integrity.ok&&CH)?'Chain intact':'CHAIN BROKEN')+' ('+r.checkpoints+' checkpoints)',11,1,8],
+  ['Originality: '+(o?o.score+'% ('+o.label+')':'not enough text to score'),11,1],
+  ['Typed share: '+(r.typedShare==null?'n/a':Math.round(r.typedShare*100)+'%')+'    Active writing: '+r.activeMinutes+' min    Writing bursts: '+r.writingBursts,11],
+  ['Large pastes (200+ characters): '+r.largePastes.length+'    Time span: '+r.spanMinutes+' min',11]];
+ if(D.chain.length)rows.push(['First checkpoint: '+new Date(D.chain[0].serverTime).toLocaleString(),11,0,8],['Last checkpoint: '+new Date(D.chain.at(-1).serverTime).toLocaleString(),11]);
+ if(D.declaration)rows.push(['Author declaration: '+DECL[D.declaration.level]+(D.declaration.note?' '+D.declaration.note:''),10,0,8]);
+ if(D.merkleRoot)rows.push(['Record fingerprint (Merkle root):',11,1,12],[D.merkleRoot.slice(0,32),10],[D.merkleRoot.slice(32),10]);
+ rows.push(['Verify online:',11,1,12],[location.origin+'/verify.html?id='+D.id,10]);
+ wrap('This certificate describes how the text was entered in AuthorTrail. It is not an AI detector and cannot show that a person did not read and retype other text. Check the record online to confirm it.',92).forEach((t,i)=>rows.push([t,9,0,i?0:16]));
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([buildPdf(rows)],{type:'application/pdf'}));a.download='authortrail-certificate-'+D.id+'.pdf';document.body.appendChild(a);a.click();a.remove()}
 let D,CH,K=new URLSearchParams(location.search).get('k')||'';const qk=()=>K?'?k='+encodeURIComponent(K):'';
 async function load(id){$('#err').textContent='';try{D=await api('docs/'+id+qk())}catch(e){$('#out').hidden=true;return $('#err').textContent=e.message==='Document not found'?'Document not found. Check the ID and try again.':e.message}
 const ok=D.integrity.ok&&await chainOk(D.chain,D.genesis);CH=ok;$('#out').hidden=false;
 $('#seal').className='seal '+(ok?'ok':'bad');$('#seal').innerHTML=ok?'Chain<br>intact':'Chain<br>broken';
 $('#title').textContent=D.title;$('#meta').textContent='Started '+new Date(D.createdAt).toLocaleString()+'. Chain checked in your browser.';
 const dc=D.declaration;$('#decl').hidden=!dc;if(dc)$('#decl').innerHTML=`<h3>Author's declaration</h3><p style="margin:0">${DECL[dc.level]}${dc.note?' '+esc(dc.note):''}</p><p class="note" style="margin:6px 0 0">Stated by the author. AuthorTrail does not verify it.</p>`;
+$('#cert').onclick=()=>downloadCert(D);
 $('#dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(D,null,1)],{type:'application/json'}));a.download='evidence-'+D.id+'.json';a.click()};
 $('#shareP').hidden=!D.isOwner;if(D.isOwner){const post=(p,b)=>api(`docs/${D.id}/${p}`,{method:'POST',headers:{'Content-Type':'application/json','x-owner-token':(lib().find(x=>x.id===D.id)||{}).token||''},body:JSON.stringify(b||{})}),sm=t=>$('#shm').textContent=t;
  $('#vis').value=D.visibility;$('#dl2').value=dc?dc.level:'';$('#dn').value=dc?dc.note:'';$('#sd').onclick=()=>post('settings',{declaration:{level:$('#dl2').value,note:$('#dn').value}}).then(()=>{sm('Declaration saved.');load(D.id)}).catch(e=>sm(e.message));$('#vis').onchange=()=>post('settings',{visibility:$('#vis').value}).then(()=>sm('Saved.')).catch(e=>sm(e.message));
